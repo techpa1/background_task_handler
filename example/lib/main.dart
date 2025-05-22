@@ -22,6 +22,7 @@ class _MyAppState extends State<MyApp> {
   String _permissionStatus = 'Checking permissions...';
   bool _isTaskRunning = false;
   bool _isPersistentMode = false;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
@@ -49,11 +50,11 @@ class _MyAppState extends State<MyApp> {
           // Wait for the next frame to ensure MaterialApp is fully initialized
           await Future.delayed(const Duration(milliseconds: 100));
           if (mounted) {
-            // Use the context from the Scaffold
-            final scaffoldContext = context;
-            if (Navigator.of(scaffoldContext) != null) {
+            // Use the navigator key to get the correct context
+            final navigatorContext = _navigatorKey.currentContext;
+            if (navigatorContext != null) {
               await PermissionHelper.showBatteryOptimizationDialog(
-                  scaffoldContext);
+                  navigatorContext);
             }
           }
         }
@@ -110,6 +111,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Background Task Handler Example',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -164,8 +166,13 @@ class _MyAppState extends State<MyApp> {
                   ),
                   const SizedBox(height: 20),
                   TextButton(
-                    onPressed: () =>
-                        PermissionHelper.showBatteryOptimizationDialog(context),
+                    onPressed: () {
+                      final navigatorContext = _navigatorKey.currentContext;
+                      if (navigatorContext != null) {
+                        PermissionHelper.showBatteryOptimizationDialog(
+                            navigatorContext);
+                      }
+                    },
                     child: const Text('Open Battery Optimization Settings'),
                   ),
                 ],
