@@ -14,6 +14,7 @@ class BackgroundService : Service() {
     private var isRunning = false
     private val CHANNEL_ID = "background_task_channel"
     private val NOTIFICATION_ID = 1
+    private var notificationManager: NotificationManager? = null
 
     companion object {
         const val EXTRA_IS_PERSISTENT = "is_persistent"
@@ -24,6 +25,7 @@ class BackgroundService : Service() {
         super.onCreate()
         createNotificationChannel()
         acquireWakeLock()
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -33,6 +35,9 @@ class BackgroundService : Service() {
             isRunning = true
             startForeground(NOTIFICATION_ID, createNotification())
             doBackgroundWork()
+        } else {
+            // If service is already running, update the notification
+            updateNotification()
         }
         
         return if (isPersistentMode) START_STICKY else START_NOT_STICKY
@@ -68,11 +73,19 @@ class BackgroundService : Service() {
             .setContentText(if (isPersistentMode) "Service is active (Persistent)" else "Service is active (One-time)")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
-            .setOngoing(isPersistentMode)
+            .setOngoing(true) // Make notification persistent
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(false) // Prevent notification from being dismissed
             .build()
+    }
+
+    private fun updateNotification() {
+        if (isRunning) {
+            val notification = createNotification()
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun doBackgroundWork() {
@@ -80,6 +93,11 @@ class BackgroundService : Service() {
             while (isRunning) {
                 try {
                     Log.d("BackgroundService", "Working... (Mode: ${if (isPersistentMode) "Persistent" else "One-time"})")
+                    // Check if notification is still active
+                    if (notificationManager?.getActiveNotifications()?.none { it.id == NOTIFICATION_ID } == true) {
+                        Log.d("BackgroundService", "Notification was removed, recreating...")
+                        updateNotification()
+                    }
                     Thread.sleep(60000) // Sleep for 1 minute
                 } catch (e: InterruptedException) {
                     Log.e("BackgroundService", "Thread interrupted", e)
