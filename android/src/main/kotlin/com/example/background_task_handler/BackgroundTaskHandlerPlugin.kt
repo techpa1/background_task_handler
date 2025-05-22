@@ -11,6 +11,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import android.util.Log
 
 /** BackgroundTaskHandlerPlugin */
 class BackgroundTaskHandlerPlugin :
@@ -23,12 +24,99 @@ class BackgroundTaskHandlerPlugin :
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var alarmScheduler: AlarmScheduler
+    private val manufacturer: String = Build.MANUFACTURER.lowercase()
+    private val isOplusDevice = manufacturer.contains("oppo") || manufacturer.contains("oneplus")
+    private val isXiaomiDevice = manufacturer.contains("xiaomi") || manufacturer.contains("redmi") || manufacturer.contains("poco")
+    private val isHuaweiDevice = manufacturer.contains("huawei") || manufacturer.contains("honor")
+    private val isSamsungDevice = manufacturer.contains("samsung")
+    private val isVivoDevice = manufacturer.contains("vivo")
+    private val isRealmeDevice = manufacturer.contains("realme")
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "background_task_handler")
         channel.setMethodCallHandler(this)
         context = flutterPluginBinding.applicationContext
         alarmScheduler = AlarmScheduler(context)
+    }
+
+    private fun createBatteryOptimizationIntent(): Intent {
+        return when {
+            isOplusDevice -> {
+                // OnePlus/Oppo specific settings
+                Intent().apply {
+                    action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    data = Uri.fromParts("package", context.packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("package_name", context.packageName)
+                    putExtra("class_name", "com.android.settings.SubSettings")
+                    putExtra("settings:show_fragment", "com.android.settings.fuelgauge.PowerUsageSummary")
+                    putExtra("settings:show_fragment_title", "Battery")
+                }
+            }
+            isXiaomiDevice -> {
+                // Xiaomi/Redmi/Poco specific settings
+                Intent().apply {
+                    action = "miui.intent.action.OP_AUTO_START"
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("package_name", context.packageName)
+                    putExtra("class_name", "com.miui.securitycenter.operationguide.AppOperationGuideActivity")
+                }
+            }
+            isHuaweiDevice -> {
+                // Huawei/Honor specific settings
+                Intent().apply {
+                    action = "huawei.intent.action.HSM_BATTERY_SAVER"
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("package_name", context.packageName)
+                }
+            }
+            isSamsungDevice -> {
+                // Samsung specific settings
+                Intent().apply {
+                    action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    data = Uri.fromParts("package", context.packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("package_name", context.packageName)
+                    putExtra("class_name", "com.samsung.android.sm.ui.battery.BatteryActivity")
+                }
+            }
+            isVivoDevice -> {
+                // Vivo specific settings
+                Intent().apply {
+                    action = "vivo.intent.action.BACKGROUND_APP_MANAGER"
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("package_name", context.packageName)
+                }
+            }
+            isRealmeDevice -> {
+                // Realme specific settings
+                Intent().apply {
+                    action = "com.coloros.action.OP_AUTO_START"
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("package_name", context.packageName)
+                }
+            }
+            else -> {
+                // Standard battery optimization settings
+                Intent().apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                        data = Uri.parse("package:${context.packageName}")
+                    } else {
+                        action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                        data = Uri.fromParts("package", context.packageName, null)
+                    }
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+            }
+        }
     }
 
     override fun onMethodCall(
@@ -52,13 +140,24 @@ class BackgroundTaskHandlerPlugin :
             }
             "openBatteryOptimizationSettings" -> {
                 try {
-                    val intent = Intent().apply {
-                        action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                        data = Uri.parse("package:${context.packageName}")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    val intent = createBatteryOptimizationIntent()
+
+                    // Try to start the activity
+                    try {
+                        context.startActivity(intent)
+                        result.success(null)
+                    } catch (e: Exception) {
+                        // If the first attempt fails, try the alternative approach
+                        Log.e("BackgroundTaskHandler", "Failed to open settings with primary intent: ${e.message}")
+                        val fallbackIntent = Intent().apply {
+                            action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                            data = Uri.fromParts("package", context.packageName, null)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        }
+                        context.startActivity(fallbackIntent)
+                        result.success(null)
                     }
-                    context.startActivity(intent)
-                    result.success(null)
                 } catch (e: Exception) {
                     result.error("ERROR", "Failed to open battery optimization settings", e.message)
                 }
@@ -121,13 +220,28 @@ class BackgroundTaskHandlerPlugin :
     }
 
     private fun requestPermissions(result: Result) {
-        val intent = Intent().apply {
-            action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-            data = Uri.parse("package:${context.packageName}")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        try {
+            val intent = createBatteryOptimizationIntent()
+
+            // Try to start the activity
+            try {
+                ContextCompat.startActivity(context, intent, null)
+                result.success(true)
+            } catch (e: Exception) {
+                // If the first attempt fails, try the alternative approach
+                Log.e("BackgroundTaskHandler", "Failed to open settings with primary intent: ${e.message}")
+                val fallbackIntent = Intent().apply {
+                    action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    data = Uri.fromParts("package", context.packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                ContextCompat.startActivity(context, fallbackIntent, null)
+                result.success(true)
+            }
+        } catch (e: Exception) {
+            result.error("ERROR", "Failed to request permissions", e.message)
         }
-        ContextCompat.startActivity(context, intent, null)
-        result.success(true)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
