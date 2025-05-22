@@ -46,12 +46,16 @@ class _MyAppState extends State<MyApp> {
 
       if (permissions['batteryOptimization'] == false) {
         if (mounted) {
-          // Use Future.delayed to ensure MaterialApp is fully initialized
-          Future.delayed(Duration.zero, () {
-            if (mounted) {
-              PermissionHelper.showBatteryOptimizationDialog(context);
+          // Wait for the next frame to ensure MaterialApp is fully initialized
+          await Future.delayed(const Duration(milliseconds: 100));
+          if (mounted) {
+            // Use the context from the Scaffold
+            final scaffoldContext = context;
+            if (Navigator.of(scaffoldContext) != null) {
+              await PermissionHelper.showBatteryOptimizationDialog(
+                  scaffoldContext);
             }
-          });
+          }
         }
       }
 
