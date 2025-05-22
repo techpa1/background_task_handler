@@ -1,14 +1,32 @@
 # Background Task Handler
 
-A Flutter plugin for handling background tasks with proper permission management and foreground service support in Android.
+A robust Flutter plugin for handling background tasks with proper permission management, foreground service support, and persistent background execution.
 
 ## Features
 
-- Schedule and manage background tasks
-- Handle foreground services with notifications
-- Proper permission management
-- Battery optimization handling
-- Clean architecture implementation
+- 🚀 **Background Task Management**
+  - Schedule and manage background tasks with configurable intervals
+  - Support for both one-time and persistent background tasks
+  - Automatic task rescheduling after device reboot
+  - Reliable background execution even when the app is closed
+
+- 🔔 **Foreground Service Support**
+  - Persistent foreground service with notification
+  - Automatic notification recreation if removed
+  - Customizable notification content and appearance
+  - Low-priority notifications to minimize user disturbance
+
+- 🔒 **Permission Management**
+  - Comprehensive permission handling for Android
+  - Battery optimization exemption management
+  - Notification permission handling (Android 13+)
+  - Exact alarm permission handling (Android 12+)
+
+- ⚡ **Performance & Reliability**
+  - Wake lock management for reliable execution
+  - Battery optimization handling
+  - Service persistence in persistent mode
+  - Automatic service recovery
 
 ## Installation
 
@@ -21,18 +39,26 @@ dependencies:
 
 ## Required Permissions
 
-The plugin requires the following permissions to work properly:
-
 ### Android Manifest Permissions
 Add these permissions to your `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
+<!-- Required for foreground service -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+<!-- Required for background execution -->
 <uses-permission android:name="android.permission.WAKE_LOCK" />
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+<!-- Required for battery optimization -->
 <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+<!-- Required for exact alarms -->
 <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+<!-- Required for notifications -->
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
 
@@ -88,7 +114,10 @@ Future<void> checkAndRequestPermissions() async {
 
 ```dart
 // Schedule a task to run every 60 seconds
-await BackgroundTaskHandler.scheduleTask(intervalInSeconds: 60);
+await BackgroundTaskHandler.scheduleTask(
+  intervalInSeconds: 60,
+  isPersistent: true, // Set to true for persistent mode
+);
 ```
 
 ### 3. Cancel a Background Task
@@ -97,29 +126,73 @@ await BackgroundTaskHandler.scheduleTask(intervalInSeconds: 60);
 await BackgroundTaskHandler.cancelTask();
 ```
 
-## Permission Handling
+## Features in Detail
 
-### Battery Optimization Dialog
-The plugin provides a built-in dialog for requesting battery optimization exemption:
+### Background Task Modes
 
-```dart
-await PermissionHelper.showBatteryOptimizationDialog(context);
-```
+1. **One-time Mode**
+   - Task runs for the specified interval
+   - Stops when the interval is complete
+   - Suitable for short-term background operations
 
-This dialog:
-- Explains why battery optimization needs to be disabled
-- Provides a button to open system settings
-- Helps users understand the importance of the permission
+2. **Persistent Mode**
+   - Task continues running indefinitely
+   - Automatically restarts if killed
+   - Survives device reboots
+   - Suitable for long-term background operations
 
-### Permission Status
-You can check the status of all required permissions:
+### Notification Handling
 
-```dart
-final permissions = await BackgroundTaskHandler.checkPermissions();
-print('Notification permission: ${permissions['notification']}');
-print('Exact alarm permission: ${permissions['exactAlarm']}');
-print('Battery optimization: ${permissions['batteryOptimization']}');
-```
+- **Persistent Notifications**
+  - Cannot be dismissed by the user
+  - Automatically recreated if removed
+  - Low priority to minimize user disturbance
+  - Customizable content and appearance
+
+- **Notification Channel**
+  - Low importance channel
+  - No sound or vibration
+  - No badge
+  - Public visibility
+
+### Permission Handling
+
+1. **Battery Optimization**
+   - Shows a dialog explaining the importance
+   - Direct link to system settings
+   - Handles user rejection gracefully
+
+2. **Notification Permission**
+   - Handles Android 13+ requirements
+   - Shows system permission dialog
+   - Graceful fallback if denied
+
+3. **Exact Alarm Permission**
+   - Handles Android 12+ requirements
+   - Shows system permission dialog
+   - Graceful fallback if denied
+
+## Limitations and Considerations
+
+1. **Battery Impact**
+   - Persistent mode may impact battery life
+   - Wake lock is used for reliable execution
+   - Consider using one-time mode for less critical tasks
+
+2. **Android Version Compatibility**
+   - Some features require specific Android versions
+   - Permission handling varies by Android version
+   - Graceful fallbacks for older versions
+
+3. **Device Manufacturer Restrictions**
+   - Some manufacturers have aggressive battery optimization
+   - May require manual settings adjustment
+   - Not all devices support exact alarms
+
+4. **Background Execution Limits**
+   - Android may restrict background execution
+   - Battery optimization may affect reliability
+   - Consider using foreground service for critical tasks
 
 ## Error Handling
 
@@ -129,12 +202,14 @@ The plugin provides proper error handling for various scenarios:
 - Service start/stop failures
 - Alarm scheduling failures
 - Battery optimization issues
+- Resource cleanup errors
 
 ## Example
 
 See the `example` directory for a complete implementation of the plugin, including:
 - Permission handling
 - Task scheduling
+- Service management
 - Error handling
 - UI implementation
 
@@ -146,3 +221,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## Support
+
+If you encounter any issues or have questions, please:
+1. Check the [documentation](https://github.com/techpa1/background_task_handler)
+2. Search [existing issues](https://github.com/techpa1/background_task_handler/issues)
+3. Create a new issue if needed
