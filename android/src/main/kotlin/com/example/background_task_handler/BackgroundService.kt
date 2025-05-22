@@ -15,6 +15,14 @@ import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.app.AlarmManager
 import android.os.SystemClock
+import android.content.SharedPreferences
+import android.view.WindowManager
+import android.app.ActivityManager.RunningAppProcessInfo
+import android.os.Handler
+import android.os.Looper
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.os.Bundle
 
 class BackgroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
@@ -26,26 +34,59 @@ class BackgroundService : Service() {
     private var manufacturer: String = Build.MANUFACTURER.lowercase()
     private var isOplusDevice = manufacturer.contains("oppo") || manufacturer.contains("oneplus")
     private var alarmManager: AlarmManager? = null
+    private lateinit var prefs: SharedPreferences
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var notificationReceiver: BroadcastReceiver? = null
 
     companion object {
         const val EXTRA_IS_PERSISTENT = "is_persistent"
-        private var isPersistentMode = false
+        private const val PREFS_NAME = "BackgroundServicePrefs"
+        private const val KEY_IS_PERSISTENT = "is_persistent"
         private const val NOTIFICATION_CHECK_INTERVAL = 5000L // Check every 5 seconds
         private const val RESTART_DELAY = 1000L // 1 second delay before restart
         private const val OPLUS_CHECK_INTERVAL = 30000L // Check every 30 seconds for Oplus devices
         private const val ALARM_INTERVAL = 15 * 60 * 1000L // 15 minutes
+        private const val OPLUS_PROCESS_CHECK_INTERVAL = 60000L // Check every minute for Oplus devices
+        private const val ACTION_NOTIFICATION_REMOVED = "com.example.background_task_handler.NOTIFICATION_REMOVED"
     }
 
     override fun onCreate() {
         super.onCreate()
+        prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         createNotificationChannel()
         acquireWakeLock()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         setServicePriority()
+        registerNotificationReceiver()
         if (isOplusDevice) {
             startOplusProtection()
+            startOplusProcessCheck()
         }
+    }
+
+    private fun registerNotificationReceiver() {
+        notificationReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == ACTION_NOTIFICATION_REMOVED) {
+                    mainHandler.post {
+                        updateNotification()
+                    }
+                }
+            }
+        }
+        registerReceiver(notificationReceiver, IntentFilter(ACTION_NOTIFICATION_REMOVED))
+    }
+
+    private fun unregisterNotificationReceiver() {
+        try {
+            notificationReceiver?.let {
+                unregisterReceiver(it)
+            }
+        } catch (e: Exception) {
+            Log.e("BackgroundService", "Error unregistering notification receiver", e)
+        }
+        notificationReceiver = null
     }
 
     private fun startOplusProtection() {
@@ -68,6 +109,44 @@ class BackgroundService : Service() {
                     break
                 } catch (e: Exception) {
                     Log.e("BackgroundService", "Error in Oplus protection", e)
+                }
+            }
+        }.start()
+    }
+
+    private fun startOplusProcessCheck() {
+        Thread {
+            while (isRunning) {
+                try {
+                    if (isOplusDevice) {
+                        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        val runningProcesses = activityManager.runningAppProcesses
+                        val currentProcess = runningProcesses?.find { it.pid == Process.myPid() }
+                        
+                        if (currentProcess != null) {
+                            // Ensure our process stays in foreground priority
+                            if (currentProcess.importance > RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                                Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
+                                // Try to set component enabled state
+                                try {
+                                    val componentName = ComponentName(this, BackgroundService::class.java)
+                                    packageManager.setComponentEnabledSetting(
+                                        componentName,
+                                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                                        PackageManager.DONT_KILL_APP
+                                    )
+                                } catch (e: Exception) {
+                                    Log.e("BackgroundService", "Error setting component state", e)
+                                }
+                            }
+                        }
+                    }
+                    Thread.sleep(OPLUS_PROCESS_CHECK_INTERVAL)
+                } catch (e: InterruptedException) {
+                    Log.d("BackgroundService", "Oplus process check thread interrupted")
+                    break
+                } catch (e: Exception) {
+                    Log.e("BackgroundService", "Error in Oplus process check", e)
                 }
             }
         }.start()
@@ -163,12 +242,20 @@ class BackgroundService : Service() {
         }
     }
 
+    private var isPersistentMode: Boolean
+        get() = prefs.getBoolean(KEY_IS_PERSISTENT, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_IS_PERSISTENT, value).apply()
+        }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Check if this is an alarm trigger
         val isAlarmTrigger = intent?.action == "com.example.background_task_handler.ALARM_TRIGGER"
         
-        // Set persistent mode based on developer's intent
-        isPersistentMode = intent?.getBooleanExtra(EXTRA_IS_PERSISTENT, false) ?: false
+        // Set persistent mode based on intent or existing state
+        if (intent?.hasExtra(EXTRA_IS_PERSISTENT) == true) {
+            isPersistentMode = intent.getBooleanExtra(EXTRA_IS_PERSISTENT, false)
+        }
         
         if (!isRunning) {
             isRunning = true
@@ -180,7 +267,7 @@ class BackgroundService : Service() {
             updateNotification()
         }
 
-        // Schedule next alarm only if in persistent mode
+        // Schedule next alarm if in persistent mode
         if (isPersistentMode) {
             scheduleAlarm()
         }
@@ -203,6 +290,12 @@ class BackgroundService : Service() {
                 setSound(null, null)
                 if (isOplusDevice) {
                     setImportance(NotificationManager.IMPORTANCE_HIGH)
+                    // Oplus specific channel settings
+                    enableVibration(false)
+                    setShowBadge(false)
+                    // Disable Oplus-specific features
+                    setShowBadge(false)
+                    enableLights(false)
                 }
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -214,7 +307,18 @@ class BackgroundService : Service() {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val deleteIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            Intent(ACTION_NOTIFICATION_REMOVED),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -223,6 +327,7 @@ class BackgroundService : Service() {
             .setContentText(if (isPersistentMode) "Service is active (Persistent)" else "Service is active (One-time)")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(deleteIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -243,7 +348,9 @@ class BackgroundService : Service() {
             } catch (e: Exception) {
                 Log.e("BackgroundService", "Error updating notification", e)
                 if (isPersistentMode) {
-                    restartService()
+                    mainHandler.postDelayed({
+                        restartService()
+                    }, RESTART_DELAY)
                 }
             }
         }
@@ -256,7 +363,9 @@ class BackgroundService : Service() {
                 try {
                     if (notificationManager?.getActiveNotifications()?.none { it.id == NOTIFICATION_ID } == true) {
                         Log.d("BackgroundService", "Notification was removed, recreating...")
-                        updateNotification()
+                        mainHandler.post {
+                            updateNotification()
+                        }
                     }
                     Thread.sleep(NOTIFICATION_CHECK_INTERVAL)
                 } catch (e: InterruptedException) {
@@ -335,6 +444,7 @@ class BackgroundService : Service() {
         isRunning = false
         notificationCheckThread?.interrupt()
         notificationCheckThread = null
+        unregisterNotificationReceiver()
         releaseWakeLock()
         
         if (isPersistentMode) {
@@ -344,7 +454,9 @@ class BackgroundService : Service() {
             // Add a small delay before restarting to prevent rapid restarts
             Thread {
                 Thread.sleep(RESTART_DELAY)
-                restartService()
+                mainHandler.post {
+                    restartService()
+                }
             }.start()
         }
         
