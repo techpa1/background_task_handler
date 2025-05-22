@@ -1,6 +1,6 @@
 # Background Task Handler
 
-A Flutter plugin for handling background tasks with proper permission management and foreground service support.
+A Flutter plugin for handling background tasks with proper permission management and foreground service support in Android.
 
 ## Features
 
